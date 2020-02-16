@@ -1,8 +1,8 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, url_for
 import os
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.ext.automap import automap_base
-from sqlalchemy.sql import func
+#from sqlalchemy.sql import func
 import datetime as dt
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -10,7 +10,7 @@ import pandas as pd
 import sympy.matrices.benchmarks
 
 
-app = Flask(__name__)
+app = Flask(__name__, static_url_path=r'/static')
 
 
 basedir = r'C:\Users\Juan\bootcamp\Homework\homework_08\data\hawaii.sqlite'
@@ -27,9 +27,9 @@ Imputed = Base.classes.imputed
 # For Usage elsewhere 
 date_format = r'%Y-%m-%d'
 # Routing Here:
-host_port = r'http://127.0.0.1:5000/'
+host_port = r'http://127.0.0.1:5000'
 end_point = r'/api/sick_to_thegnar/'
-options = ['prcp', 'station', 'tobs']
+options = ['prcp', 'station', 'tobs', r'date_start', r'date_start/date_end', 'images']
 
 # A helper function:
 def l2str(input_seq, seperator):
@@ -48,7 +48,7 @@ def last_date(column,date_format):
     Returns: 
         * : .
     '''
-    return datetime.strptime(db.session.query(func.max(column)).first()[0], date_format).date()
+    return datetime.strptime(db.session.query(db.func.max(column)).first()[0], date_format).date()
     # return datetime.strptime(session.query(Measurement.date).order_by(desc(Measurement.date)).first()[0], date_format).date()
 def one_year_ago(column, date_format):
     ''' Returns The date exactly a year prior  to the newest record in a table
@@ -77,11 +77,15 @@ def query_tobs_year(date, table, date_format, station):
     tobs_year = db.session.query(table.id, table.date, table.tobs).filter(table.date.between(one_year_ago(table.date, date_format),date)).filter(table.station==station)
     tobs_year = pd.DataFrame.from_records(tobs_year.all(),columns=columns)
     return tobs_year
+# Some Helpful lists for the dynamic requests:
+ops = ['min', 'max','avg']
+q_statement= l2str([f'db.func.{x}(Measurement.tobs)' for x in ops],", ")
 
 #Landing Page with list of endpoints and sample calls:
 @app.route("/")
 def index():
-    terminals = [f'<a href={host_port}{end_point}{options[x]}>{host_port}{end_point}{options[x]}</a>' for x in range(len(options))]
+    #terminals = [f'<a href={host_port}{end_point}{options[x]}>{host_port}{end_point}{options[x]}</a>' for x in range(len(options))]
+    terminals = [f'{host_port}{end_point}{options[x]}' for x in range(len(options))]
     return(f'{l2str(terminals, "</br>")}')
 # Routes:
 
@@ -102,6 +106,25 @@ def station():
 @app.route(f'{end_point}{options[2]}')
 def tobs():
     columns = ['id', 'date', 'prcp']
-    most_active_station = db.session.query(Measurement.station, func.count(Measurement.station)).group_by(Measurement.station).order_by(func.count(Measurement.station))[-1][0]
+    most_active_station = db.session.query(Measurement.station, db.func.count(Measurement.station)).group_by(Measurement.station).order_by(db.func.count(Measurement.station))[-1][0]
     df = query_tobs_year(last_date(Measurement.date, date_format), Measurement, date_format, most_active_station)
     return(df[['date', 'tobs']].to_json(orient='records', indent=4))
+
+@app.route(f'{end_point}<{options[3]}>')
+def date_startto_now(date_start='2015-12-25'):
+    columns=['tmin','tmax','tavg']
+    temp_stats = db.session.query(db.func.min(Measurement.tobs), db.func.max(Measurement.tobs), db.func.avg(Measurement.tobs)).filter(Measurement.date >= date_start).all()
+    df = pd.DataFrame.from_records(temp_stats, columns=columns)
+    return(df.to_json(orient='records', indent=4))
+
+@app.route(f'{end_point}<{options[4][:10]}>/<{options[4][11:]}>')
+def date_startto_end(date_start=None, date_end=None):
+    columns = ['tmin', 'tmax', 'avg']
+    temp_stats = db.session.query(db.func.min(Measurement.tobs), db.func.max(Measurement.tobs), db.func.avg(Measurement.tobs)).filter(Measurement.date >= date_start).filter(Measurement.date <= date_end).all()
+    df = pd.DataFrame.from_records(temp_stats, columns=columns)
+    return(df.to_json(orient='records', indent=4))
+
+@app.route(f'{end_point}{options[5]}')
+def images():
+    return(f'<img src={url_for(r"static", filename=r"tmp_freq.svg")}></br><img src={url_for(r"static", filename=r"a_years_precip.svg")}>')
+
